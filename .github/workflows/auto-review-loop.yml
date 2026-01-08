@@ -1,0 +1,67 @@
+name: Auto Review Loop
+
+on:
+  workflow_call:
+    inputs:
+      poll_interval:
+        description: 'Time in seconds between polling for responses'
+        required: false
+        type: number
+        default: 30
+      timeout_seconds:
+        description: 'Maximum time in seconds to wait for responses'
+        required: false
+        type: number
+        default: 3600
+    secrets:
+      GITHUB_TOKEN:
+        required: false
+
+  pull_request:
+    types: [review_requested]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Prevent multiple workflows running on the same PR
+concurrency:
+  group: auto-review-loop-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-review:
+    name: Automated Review Loop
+    runs-on: ubuntu-latest
+
+    # Only run when Copilot requests review
+    if: |
+      github.event.review_request &&
+      github.event.requested_reviewer.login == 'github-copilot[bot]'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup GitHub CLI
+        run: |
+          # Verify gh CLI is available
+          gh --version
+
+      - name: Run Auto-Review Loop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Ensure script is executable
+          chmod +x ./scripts/review-loop.sh
+
+          # Run the review loop
+          ./scripts/review-loop.sh \
+            "${PR_NUMBER}" \
+            "${REPO}" \
+            "${{ inputs.poll_interval || 30 }}" \
+            "${{ inputs.timeout_seconds || 3600 }}"

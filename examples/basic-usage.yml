@@ -1,0 +1,25 @@
+name: Copilot/Codex Auto Review (Basic)
+
+on:
+  pull_request:
+    types: [review_requested]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Prevent multiple workflows running on the same PR
+concurrency:
+  group: auto-review-loop-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-review:
+    name: Auto Review Loop
+
+    # Only run when Copilot requests review
+    if: |
+      github.event.review_request &&
+      github.event.requested_reviewer.login == 'github-copilot[bot]'
+
+    uses: dhabibi/copilot-ralph-wiggum/.github/workflows/auto-review-loop.yml@main

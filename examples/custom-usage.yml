@@ -1,0 +1,42 @@
+name: Copilot/Codex Auto Review (Custom)
+
+on:
+  pull_request:
+    types: [review_requested]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Prevent multiple workflows running on the same PR
+concurrency:
+  group: auto-review-loop-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-review:
+    name: Auto Review Loop
+    runs-on: ubuntu-latest
+
+    # Only run when Copilot requests review
+    if: |
+      github.event.review_request &&
+      github.event.requested_reviewer.login == 'github-copilot[bot]'
+
+    steps:
+      - name: Run Copilot/Codex Review Loop
+        uses: dhabibi/copilot-ralph-wiggum@main
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          repository: ${{ github.repository }}
+          poll_interval: 30  # Check for responses every 30 seconds
+          timeout_seconds: 3600  # Wait up to 1 hour for responses
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # You can add additional steps here
+      # For example, send notifications, update tracking systems, etc.
+      - name: Notify on completion
+        if: success()
+        run: |
+          echo "Review loop completed successfully!"
+          # Add your custom notification logic here

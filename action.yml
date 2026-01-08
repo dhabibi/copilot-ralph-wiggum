@@ -1,0 +1,67 @@
+name: 'Copilot/Codex Auto Review Loop'
+description: 'Automatically orchestrate a review loop between GitHub Copilot and Codex for pull requests'
+author: 'dhabibi'
+
+branding:
+  icon: 'refresh-cw'
+  color: 'blue'
+
+inputs:
+  pr_number:
+    description: 'Pull request number to review'
+    required: true
+  repository:
+    description: 'Repository in owner/repo format'
+    required: false
+    default: ${{ github.repository }}
+  poll_interval:
+    description: 'Time in seconds between polling for responses'
+    required: false
+    default: '30'
+  timeout_seconds:
+    description: 'Maximum time in seconds to wait for responses'
+    required: false
+    default: '3600'
+  github_token:
+    description: 'GitHub token for API access'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup GitHub CLI
+      shell: bash
+      run: |
+        # Verify gh CLI is available
+        gh --version
+
+    - name: Download review-loop script
+      shell: bash
+      run: |
+        # If script doesn't exist locally, download it from this repo
+        if [ ! -f "./scripts/review-loop.sh" ]; then
+          echo "Downloading review-loop.sh from repository..."
+          mkdir -p ./scripts
+          curl -sSL "https://raw.githubusercontent.com/dhabibi/copilot-ralph-wiggum/main/scripts/review-loop.sh" \
+            -o ./scripts/review-loop.sh
+          chmod +x ./scripts/review-loop.sh
+        else
+          echo "Using local review-loop.sh script"
+          chmod +x ./scripts/review-loop.sh
+        fi
+
+    - name: Run Auto-Review Loop
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        ./scripts/review-loop.sh \
+          "${{ inputs.pr_number }}" \
+          "${{ inputs.repository }}" \
+          "${{ inputs.poll_interval }}" \
+          "${{ inputs.timeout_seconds }}"
