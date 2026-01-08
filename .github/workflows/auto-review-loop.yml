@@ -1,6 +1,7 @@
 name: Auto Review Loop
 
 on:
+  # Allow this workflow to be called by other workflows (reusable workflow pattern)
   workflow_call:
     inputs:
       poll_interval:
@@ -17,6 +18,7 @@ on:
       GITHUB_TOKEN:
         required: false
 
+  # Also allow direct triggering when used as a standalone workflow in a repo
   pull_request:
     types: [review_requested]
 

@@ -40,27 +40,27 @@ runs:
         # Verify gh CLI is available
         gh --version
 
-    - name: Download review-loop script
+    - name: Checkout action repository
+      uses: actions/checkout@v4
+      with:
+        repository: dhabibi/copilot-ralph-wiggum
+        path: .copilot-ralph-wiggum
+        sparse-checkout: |
+          scripts/review-loop.sh
+
+    - name: Setup review-loop script
       shell: bash
       run: |
-        # If script doesn't exist locally, download it from this repo
-        if [ ! -f "./scripts/review-loop.sh" ]; then
-          echo "Downloading review-loop.sh from repository..."
-          mkdir -p ./scripts
-          curl -sSL "https://raw.githubusercontent.com/dhabibi/copilot-ralph-wiggum/main/scripts/review-loop.sh" \
-            -o ./scripts/review-loop.sh
-          chmod +x ./scripts/review-loop.sh
-        else
-          echo "Using local review-loop.sh script"
-          chmod +x ./scripts/review-loop.sh
-        fi
+        # Copy the script to a known location and make it executable
+        cp .copilot-ralph-wiggum/scripts/review-loop.sh ./review-loop.sh
+        chmod +x ./review-loop.sh
 
     - name: Run Auto-Review Loop
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
       run: |
-        ./scripts/review-loop.sh \
+        ./review-loop.sh \
           "${{ inputs.pr_number }}" \
           "${{ inputs.repository }}" \
           "${{ inputs.poll_interval }}" \

@@ -58,40 +58,31 @@ is_approved() {
     local lower_response=$(echo "${response}" | tr '[:upper:]' '[:lower:]')
     
     # First check for explicit approval phrases (these override issue detection)
-    if echo "${lower_response}" | grep -qE "(no issues|lgtm|looks good to me|ready to merge|ship it)"; then
+    # Use word boundaries to avoid false matches
+    if echo "${lower_response}" | grep -qE "\b(no issues|lgtm|looks good|ready to merge|ship it)\b"; then
         echo "  → Detected explicit approval phrase"
         return 0
     fi
     
     # Check for general approval indicators
-    local approval_words=("approve" "approved")
-    local has_approval=false
-    for word in "${approval_words[@]}"; do
-        if echo "${lower_response}" | grep -q "${word}"; then
-            has_approval=true
-            break
+    if echo "${lower_response}" | grep -qE "\b(approve|approved)\b"; then
+        # But make sure it's not "not approved" or similar
+        if ! echo "${lower_response}" | grep -qE "\b(not|isn't|isnt|cant|can't|cannot) (approve|approved)\b"; then
+            echo "  → Detected approval indicator"
+            # Still check for issues before approving
+            local issue_patterns=("there (is|are) .* (issue|problem)" "found .* (issue|problem)" "has .* (issue|problem|bug)" "\b(problem|bug|concern|error)\b" "must fix" "should fix" "needs? (to be )?fix")
+            for pattern in "${issue_patterns[@]}"; do
+                if echo "${lower_response}" | grep -qE "${pattern}"; then
+                    echo "  → But also detected issue indicator: ${pattern}"
+                    return 1  # false - not approved due to issues
+                fi
+            done
+            return 0  # true - approved
         fi
-    done
-    
-    # Check for issue indicators (but not in "no issues" context)
-    local issue_patterns=("there.*issue" "found.*issue" "has.*issue" "problem" "bug" "must fix" "should fix" "need.*fix" "concern" "error")
-    local has_issues=false
-    for pattern in "${issue_patterns[@]}"; do
-        if echo "${lower_response}" | grep -qE "${pattern}"; then
-            has_issues=true
-            echo "  → Detected issue indicator: ${pattern}"
-            break
-        fi
-    done
-    
-    # Approved only if has approval words and no issue indicators
-    if [ "${has_approval}" = true ] && [ "${has_issues}" = false ]; then
-        echo "  → Approval detected"
-        return 0  # true - approved
-    else
-        echo "  → Not approved (has_approval=${has_approval}, has_issues=${has_issues})"
-        return 1  # false - not approved
     fi
+    
+    echo "  → Not approved (no approval indicators found)"
+    return 1  # false - not approved
 }
 
 # Function to wait for a comment from a specific user
