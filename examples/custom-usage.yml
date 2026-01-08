@@ -20,7 +20,7 @@ jobs:
 
     # Only run when Copilot requests review
     if: |
-      github.event.review_request &&
+      github.event.requested_reviewer &&
       github.event.requested_reviewer.login == 'github-copilot[bot]'
 
     steps:

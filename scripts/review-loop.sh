@@ -70,7 +70,7 @@ is_approved() {
         if ! echo "${lower_response}" | grep -qE "\b(not|isn't|isnt|cant|can't|cannot) (approve|approved)\b"; then
             echo "  → Detected approval indicator"
             # Still check for issues before approving
-            local issue_patterns=("there (is|are) .* (issue|problem)" "found .* (issue|problem)" "has .* (issue|problem|bug)" "\b(problem|bug|concern|error)\b" "must fix" "should fix" "needs? (to be )?fix")
+            local issue_patterns=("there (is|are) .* (issue|problem)" "found .* (issue|problem)" "has .* (issue|problem|bug)" "\b(problem|bug|concern|error)\b" "must fix" "should fix" "need[s]? .*fix")
             for pattern in "${issue_patterns[@]}"; do
                 if echo "${lower_response}" | grep -qE "${pattern}"; then
                     echo "  → But also detected issue indicator: ${pattern}"
