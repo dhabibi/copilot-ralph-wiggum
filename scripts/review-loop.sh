@@ -57,13 +57,14 @@ is_approved() {
     local response="${1}"
     local lower_response=$(echo "${response}" | tr '[:upper:]' '[:lower:]')
     
-    # Approval indicators
-    local approval_words=("lgtm" "looks good" "approve" "no issues" "ready to merge" "ship it")
+    # First check for explicit approval phrases (these override issue detection)
+    if echo "${lower_response}" | grep -qE "(no issues|lgtm|looks good to me|ready to merge|ship it)"; then
+        echo "  → Detected explicit approval phrase"
+        return 0
+    fi
     
-    # Issue indicators
-    local issue_words=("issue" "problem" "bug" "fix" "concern" "should" "must" "error" "needs")
-    
-    # Check for approval words
+    # Check for general approval indicators
+    local approval_words=("approve" "approved")
     local has_approval=false
     for word in "${approval_words[@]}"; do
         if echo "${lower_response}" | grep -q "${word}"; then
@@ -72,19 +73,23 @@ is_approved() {
         fi
     done
     
-    # Check for issue words
+    # Check for issue indicators (but not in "no issues" context)
+    local issue_patterns=("there.*issue" "found.*issue" "has.*issue" "problem" "bug" "must fix" "should fix" "need.*fix" "concern" "error")
     local has_issues=false
-    for word in "${issue_words[@]}"; do
-        if echo "${lower_response}" | grep -q "${word}"; then
+    for pattern in "${issue_patterns[@]}"; do
+        if echo "${lower_response}" | grep -qE "${pattern}"; then
             has_issues=true
+            echo "  → Detected issue indicator: ${pattern}"
             break
         fi
     done
     
-    # Approved only if has approval words and no issue words
+    # Approved only if has approval words and no issue indicators
     if [ "${has_approval}" = true ] && [ "${has_issues}" = false ]; then
+        echo "  → Approval detected"
         return 0  # true - approved
     else
+        echo "  → Not approved (has_approval=${has_approval}, has_issues=${has_issues})"
         return 1  # false - not approved
     fi
 }
