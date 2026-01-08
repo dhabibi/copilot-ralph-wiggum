@@ -95,8 +95,8 @@ jobs:
               COMMENTS=$(gh pr view $PR_NUMBER --repo $REPO --json comments --jq ".comments[] | select(.id > $LAST_PROCESSED_COMMENT_ID) | {id: .id, author: .author.login, body: .body}")
               
               if [ -n "$COMMENTS" ]; then
-                # Look for codex response
-                CODEX_COMMENT=$(echo "$COMMENTS" | jq -s '.[] | select(.author == "codex" or .author == "codex[bot]") | .body' | tail -1)
+                # Look for codex response - get the latest one
+                CODEX_COMMENT=$(echo "$COMMENTS" | jq -s '[.[] | select(.author == "codex" or .author == "codex[bot]")] | max_by(.id) | .body' 2>/dev/null)
                 
                 if [ -n "$CODEX_COMMENT" ] && [ "$CODEX_COMMENT" != "null" ]; then
                   CODEX_RESPONSE=$(echo "$CODEX_COMMENT" | tr -d '"')
