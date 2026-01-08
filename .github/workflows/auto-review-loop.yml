@@ -1,0 +1,186 @@
+name: Automated Copilot/Codex Review Loop
+
+on:
+  pull_request:
+    types: [review_requested]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to process'
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  review-loop:
+    # Only run if review requested from github-copilot bot or triggered manually
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.requested_reviewer && 
+       (github.event.requested_reviewer.login == 'github-copilot[bot]' || 
+        github.event.requested_reviewer.login == 'copilot'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - name: Setup environment
+        id: setup
+        run: |
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Setting up review loop environment"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "pr_number=${{ inputs.pr_number }}" >> $GITHUB_OUTPUT
+          else
+            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          fi
+          echo "last_processed_comment_id=0" >> $GITHUB_OUTPUT
+          echo "last_processed_commit_sha=" >> $GITHUB_OUTPUT
+          
+      - name: Review Loop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.setup.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          LAST_PROCESSED_COMMENT_ID=0
+          LAST_PROCESSED_COMMIT_SHA=""
+          ITERATION=0
+          STALL_START_TIME=""
+          
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting review loop for PR #${PR_NUMBER}"
+          
+          while true; do
+            ITERATION=$((ITERATION + 1))
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] === Iteration $ITERATION ==="
+            
+            # Check if PR is already merged
+            PR_STATE=$(gh pr view $PR_NUMBER --repo $REPO --json state --jq '.state')
+            if [ "$PR_STATE" == "MERGED" ]; then
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] PR is already merged. Exiting gracefully."
+              exit 0
+            fi
+            
+            # Post @codex review comment
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Posting '@codex review' comment"
+            REVIEW_COMMENT_ID=$(gh pr comment $PR_NUMBER --repo $REPO --body "@codex review" --jq '.id' 2>&1 | grep -oE '[0-9]+' | head -1)
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Posted comment ID: $REVIEW_COMMENT_ID"
+            
+            # Poll for Codex response
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Polling for Codex response..."
+            CODEX_RESPONSE=""
+            POLL_START_TIME=$(date +%s)
+            TIMEOUT_SECONDS=3600  # 1 hour timeout
+            
+            while [ -z "$CODEX_RESPONSE" ]; do
+              sleep 30
+              
+              # Check timeout
+              CURRENT_TIME=$(date +%s)
+              ELAPSED=$((CURRENT_TIME - POLL_START_TIME))
+              if [ $ELAPSED -gt $TIMEOUT_SECONDS ]; then
+                echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ERROR: Timeout waiting for Codex response (1 hour)"
+                exit 1
+              fi
+              
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Checking for new comments... (${ELAPSED}s elapsed)"
+              
+              # Get all comments after the last processed one
+              COMMENTS=$(gh pr view $PR_NUMBER --repo $REPO --json comments --jq '.comments[] | select(.id > '$LAST_PROCESSED_COMMENT_ID') | {id: .id, author: .author.login, body: .body}')
+              
+              if [ -n "$COMMENTS" ]; then
+                # Look for codex response
+                CODEX_COMMENT=$(echo "$COMMENTS" | jq -s '.[] | select(.author == "codex" or .author == "codex[bot]") | .body' | tail -1)
+                
+                if [ -n "$CODEX_COMMENT" ] && [ "$CODEX_COMMENT" != "null" ]; then
+                  CODEX_RESPONSE=$(echo "$CODEX_COMMENT" | tr -d '"')
+                  NEW_LAST_COMMENT_ID=$(echo "$COMMENTS" | jq -s 'max_by(.id) | .id')
+                  LAST_PROCESSED_COMMENT_ID=$NEW_LAST_COMMENT_ID
+                  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Received Codex response (comment ID: $NEW_LAST_COMMENT_ID)"
+                fi
+              fi
+            done
+            
+            # Check for usage limits
+            if echo "$CODEX_RESPONSE" | grep -qi "usage limit"; then
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Codex usage limit detected. Labeling PR and pausing."
+              gh pr edit $PR_NUMBER --repo $REPO --add-label "waiting-for-codex-limits"
+              gh pr comment $PR_NUMBER --repo $REPO --body "⏸️ Pausing review loop due to Codex usage limits. Will automatically resume when limits reset."
+              exit 0
+            fi
+            
+            # Parse Codex response for approval
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Parsing Codex response for approval status..."
+            
+            # Convert response to lowercase for case-insensitive matching
+            RESPONSE_LOWER=$(echo "$CODEX_RESPONSE" | tr '[:upper:]' '[:lower:]')
+            
+            # Check for approval keywords
+            APPROVAL_FOUND=false
+            if echo "$RESPONSE_LOWER" | grep -qE "(lgtm|looks good|approve|no issues|ready to merge|ship it)"; then
+              APPROVAL_FOUND=true
+            fi
+            
+            # Check for negative keywords
+            ISSUES_FOUND=false
+            if echo "$RESPONSE_LOWER" | grep -qE "(issue|problem|bug|fix|concern|should|must|error|needs|not approved|cannot approve)"; then
+              ISSUES_FOUND=true
+            fi
+            
+            # Determine approval status
+            if [ "$APPROVAL_FOUND" == "true" ] && [ "$ISSUES_FOUND" == "false" ]; then
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ✅ Codex approved! Merging PR..."
+              
+              # Enable auto-merge with squash
+              gh pr merge $PR_NUMBER --repo $REPO --auto --squash
+              
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] PR merge initiated successfully"
+              exit 0
+            else
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ❌ Issues found. Requesting Copilot to address feedback..."
+              
+              # Post feedback request to Copilot
+              gh pr comment $PR_NUMBER --repo $REPO --body "@copilot address that feedback"
+              
+              # Wait for new commits from Copilot
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Waiting for Copilot to push new commits..."
+              COMMIT_POLL_START=$(date +%s)
+              NEW_COMMIT_FOUND=false
+              
+              # Get current commit SHA
+              if [ -z "$LAST_PROCESSED_COMMIT_SHA" ]; then
+                LAST_PROCESSED_COMMIT_SHA=$(gh pr view $PR_NUMBER --repo $REPO --json commits --jq '.commits[-1].oid')
+                echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Initial commit SHA: $LAST_PROCESSED_COMMIT_SHA"
+              fi
+              
+              while [ "$NEW_COMMIT_FOUND" == "false" ]; do
+                sleep 30
+                
+                # Check timeout
+                CURRENT_TIME=$(date +%s)
+                ELAPSED=$((CURRENT_TIME - COMMIT_POLL_START))
+                if [ $ELAPSED -gt $TIMEOUT_SECONDS ]; then
+                  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ERROR: Timeout waiting for Copilot commits (1 hour)"
+                  exit 1
+                fi
+                
+                echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Checking for new commits... (${ELAPSED}s elapsed)"
+                
+                LATEST_COMMIT_SHA=$(gh pr view $PR_NUMBER --repo $REPO --json commits --jq '.commits[-1].oid')
+                
+                if [ "$LATEST_COMMIT_SHA" != "$LAST_PROCESSED_COMMIT_SHA" ]; then
+                  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] New commit detected: $LATEST_COMMIT_SHA"
+                  LAST_PROCESSED_COMMIT_SHA=$LATEST_COMMIT_SHA
+                  NEW_COMMIT_FOUND=true
+                fi
+              done
+              
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] New commits pushed. Starting next review iteration..."
+            fi
+          done

@@ -1,0 +1,88 @@
+name: Resume Paused Reviews
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+jobs:
+  resume-reviews:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Find and resume paused PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting resume process for paused reviews"
+          
+          # Query PRs with waiting-for-codex-limits label
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Querying PRs with 'waiting-for-codex-limits' label..."
+          
+          PAUSED_PRS=$(gh pr list --repo $REPO --label "waiting-for-codex-limits" --state open --json number --jq '.[].number')
+          
+          if [ -z "$PAUSED_PRS" ]; then
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] No paused PRs found"
+            exit 0
+          fi
+          
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Found paused PRs: $PAUSED_PRS"
+          
+          # Process each paused PR
+          for PR_NUMBER in $PAUSED_PRS; do
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Processing PR #${PR_NUMBER}"
+            
+            # Check if PR is still open and not merged
+            PR_STATE=$(gh pr view $PR_NUMBER --repo $REPO --json state --jq '.state')
+            if [ "$PR_STATE" != "OPEN" ]; then
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] PR #${PR_NUMBER} is ${PR_STATE}. Removing label."
+              gh pr edit $PR_NUMBER --repo $REPO --remove-label "waiting-for-codex-limits"
+              continue
+            fi
+            
+            # Attempt to post @codex review
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Attempting to post '@codex review' for PR #${PR_NUMBER}"
+            
+            COMMENT_RESULT=$(gh pr comment $PR_NUMBER --repo $REPO --body "@codex review" 2>&1)
+            COMMENT_EXIT_CODE=$?
+            
+            if [ $COMMENT_EXIT_CODE -eq 0 ]; then
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Successfully posted comment for PR #${PR_NUMBER}"
+              
+              # Wait a bit and check for response
+              sleep 60
+              
+              # Get the latest comment
+              LATEST_COMMENT=$(gh pr view $PR_NUMBER --repo $REPO --json comments --jq '.comments[-1].body')
+              
+              # Check if it's a usage limit response
+              if echo "$LATEST_COMMENT" | grep -qi "usage limit"; then
+                echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Still hitting usage limits for PR #${PR_NUMBER}. Will retry next cycle."
+              else
+                echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Codex responded successfully. Removing label and triggering main workflow."
+                
+                # Remove the label
+                gh pr edit $PR_NUMBER --repo $REPO --remove-label "waiting-for-codex-limits"
+                
+                # Post status comment
+                gh pr comment $PR_NUMBER --repo $REPO --body "▶️ Resuming automated review loop - Codex limits have reset"
+                
+                # Trigger the main workflow
+                gh workflow run auto-review-loop.yml --repo $REPO --field pr_number=$PR_NUMBER
+                
+                echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Main workflow triggered for PR #${PR_NUMBER}"
+              fi
+            else
+              echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Failed to post comment for PR #${PR_NUMBER}: $COMMENT_RESULT"
+            fi
+          done
+          
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Resume process completed"
