@@ -51,9 +51,9 @@ concurrency:
 jobs:
   auto-review:
     if: |
-      github.event.review_request &&
+      github.event.requested_reviewer &&
       github.event.requested_reviewer.login == 'github-copilot[bot]'
-    
+
     uses: dhabibi/copilot-ralph-wiggum/.github/workflows/auto-review-loop.yml@main
 ```
 
@@ -84,11 +84,11 @@ concurrency:
 jobs:
   auto-review:
     runs-on: ubuntu-latest
-    
+
     if: |
-      github.event.review_request &&
+      github.event.requested_reviewer &&
       github.event.requested_reviewer.login == 'github-copilot[bot]'
-    
+
     steps:
       - uses: dhabibi/copilot-ralph-wiggum@main
         with:
