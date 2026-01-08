@@ -148,13 +148,32 @@ The workflow is triggered when:
 
 ### Approval Detection
 
-The script uses a simple but effective heuristic:
+The script uses intelligent pattern matching with word boundaries to detect approval:
 
-**Approval Keywords**: "lgtm", "looks good", "approve", "no issues", "ready to merge", "ship it"
+**Explicit Approval Phrases** (override issue detection):
+- "no issues", "lgtm", "looks good", "ready to merge", "ship it"
 
-**Issue Keywords**: "issue", "problem", "bug", "fix", "concern", "should", "must", "error", "needs"
+**General Approval Keywords**:
+- "approve", "approved" (but excludes negations like "not approved")
 
-**Logic**: Approved = (has approval keywords) AND (no issue keywords)
+**Issue Indicators** (trigger another iteration):
+- Patterns like "there is/are * issue/problem"
+- "found * issue/problem", "has * issue/problem/bug"
+- Keywords: "problem", "bug", "concern", "error"
+- "must fix", "should fix", "need/needs * fix"
+
+**Logic**:
+1. If response contains explicit approval phrases → **APPROVED** (even if issues mentioned)
+2. Else if "approve/approved" found AND no issue indicators → **APPROVED**
+3. Otherwise → **NOT APPROVED** (continue loop)
+
+**Examples**:
+- ✅ "LGTM, ship it!" → APPROVED
+- ✅ "No issues found" → APPROVED
+- ✅ "This is approved" → APPROVED
+- ❌ "There is an issue here" → NOT APPROVED
+- ❌ "Approved but has a problem" → NOT APPROVED
+- ❌ "This is not approved" → NOT APPROVED
 
 ### Edge Cases Handled
 
