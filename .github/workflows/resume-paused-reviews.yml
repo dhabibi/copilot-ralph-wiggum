@@ -76,7 +76,7 @@ jobs:
                 gh pr comment $PR_NUMBER --repo $REPO --body "▶️ Resuming automated review loop - Codex limits have reset"
                 
                 # Trigger the main workflow
-                gh workflow run auto-review-loop.yml --repo $REPO --field pr_number=$PR_NUMBER
+                gh workflow run auto-review-loop.yml --repo $REPO -f pr_number=$PR_NUMBER
                 
                 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Main workflow triggered for PR #${PR_NUMBER}"
               fi

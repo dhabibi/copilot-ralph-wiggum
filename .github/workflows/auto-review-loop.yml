@@ -69,8 +69,8 @@ jobs:
             
             # Post @codex review comment
             echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Posting '@codex review' comment"
-            REVIEW_COMMENT_ID=$(gh pr comment $PR_NUMBER --repo $REPO --body "@codex review" --jq '.id' 2>&1 | grep -oE '[0-9]+' | head -1)
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Posted comment ID: $REVIEW_COMMENT_ID"
+            gh pr comment $PR_NUMBER --repo $REPO --body "@codex review"
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Posted '@codex review' comment"
             
             # Poll for Codex response
             echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Polling for Codex response..."
@@ -92,7 +92,7 @@ jobs:
               echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Checking for new comments... (${ELAPSED}s elapsed)"
               
               # Get all comments after the last processed one
-              COMMENTS=$(gh pr view $PR_NUMBER --repo $REPO --json comments --jq '.comments[] | select(.id > '$LAST_PROCESSED_COMMENT_ID') | {id: .id, author: .author.login, body: .body}')
+              COMMENTS=$(gh pr view $PR_NUMBER --repo $REPO --json comments --jq ".comments[] | select(.id > $LAST_PROCESSED_COMMENT_ID) | {id: .id, author: .author.login, body: .body}")
               
               if [ -n "$COMMENTS" ]; then
                 # Look for codex response
